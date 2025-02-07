@@ -116,16 +116,33 @@ vagrant destroy -f
 
 
 ```bash
-# create a partition
+# create the partitions
+sudo parted /dev/sda
+## /boot 200M
+## / 20G
+## swap 2G
+mklabel gpt
+mkpart primary ext4 1MiB 201MiB
+mkpart primary ext4 201MiB 30GiB
+mkpart primary linux-swap 30GiB 32GiB
+
+# format the partitions
 mkfs -v -t ext4 /dev/<xxx>
+sudo mkfs.ext4 /dev/sda1
 # create a swap partition
 mkswap /dev/<yyy>
 ```
 
-
 ```bash
 # setup the $LFS variable
+sudo mkdir -v /mnt/lfs
 export LFS=/mnt/lfs
+# mount the partitions
+mount -v -t ext4 /dev/<xxx> $LFS
+mount -v -t ext4 /dev/<yyy> $LFS/boot
+swapon -v /dev/<zzz>
+
+systemctl daemon-reload
 ```
 
 > You should ensure that this variable is always defined throughout the LFS build process. It should be set to the name of the directory where you will be building your LFS system - we will use /mnt/lfs as an example, but you may choose any directory name you want.
