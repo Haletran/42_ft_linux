@@ -148,7 +148,7 @@ wget --input-file="https://www.linuxfromscratch.org/lfs/view/stable/wget-list-sy
 # download the packages
 wget --input-file=wget-list-sysv --continue --directory-prefix=$LFS/sources
 # make the packages owned by root
-chown root:root $LFS/sources/*
+sudo chown root:root $LFS/sources/*
 # might need to add patches to some packages https://www.linuxfromscratch.org/lfs/view/stable/chapter03/patches.html
 
 
@@ -161,8 +161,10 @@ sudo mkdir -pv $LFS/tools
 sudo groupadd lfs
 sudo useradd -s /bin/bash -g lfs -m -k /dev/null lfs
 sudo passwd lfs
+#sudo usermod -a -G sudo lfs
 
-sudo bash /vagrant/scripts/grant_permissions.sh
+sudo bash /vagrant/scripts/grant_access.sh
+#sudo chown -R lfs:lfs /mnt/lfs/tools
 
 # login as lfs
 su - lfs
@@ -210,11 +212,78 @@ cd binutils-2.43.1 && mkdir -v build && cd build
 make
 make install
 
+cd ../.. && rm -rf binutils-2.43.1
+tar -xvf $LFS/sources/gcc-14.2.0.tar.xz && cd gcc-14.2.0
 
+# prepare GCC for compilation
+tar -xf ../mpfr-4.2.1.tar.xz
+mv -v mpfr-4.2.1 mpfr
+tar -xf ../gmp-6.3.0.tar.xz
+mv -v gmp-6.3.0 gmp
+tar -xf ../mpc-1.3.1.tar.gz
+mv -v mpc-1.3.1 mpc
+
+# set the default directory for 64-bit libraries
+case $(uname -m) in
+  x86_64)
+    sed -e '/m64=/s/lib64/lib/' \
+        -i.orig gcc/config/i386/t-linux64
+ ;;
+esac
+
+
+# create a build directory
+mkdir -v build && cd build
+
+../configure                  \
+    --target=$LFS_TGT         \
+    --prefix=$LFS/tools       \
+    --with-glibc-version=2.40 \
+    --with-sysroot=$LFS       \
+    --with-newlib             \
+    --without-headers         \
+    --enable-default-pie      \
+    --enable-default-ssp      \
+    --disable-nls             \
+    --disable-shared          \
+    --disable-multilib        \
+    --disable-threads         \
+    --disable-libatomic       \
+    --disable-libgomp         \
+    --disable-libquadmath     \
+    --disable-libssp          \
+    --disable-libvtv          \
+    --disable-libstdcxx       \
+    --enable-languages=c,c++
+
+make
+make install
+
+
+cd ..
+cat gcc/limitx.h gcc/glimits.h gcc/limity.h > \
+  `dirname $($LFS_TGT-gcc -print-libgcc-file-name)`/include/limits.h
+
+
+tar -xvf linux-6.10.5.tar.xz && cd linux-6.10.5
+make mrproper
+make headers
+find usr/include -type f ! -name '*.h' -delete
+cp -rv usr/include $LFS/usr
+
+
+# attention could destroy the VM if not done correctly
+case $(uname -m) in
+    i?86)   ln -sfv ld-linux.so.2 $LFS/lib/ld-lsb.so.3
+    ;;
+    x86_64) ln -sfv ../lib/ld-linux-x86-64.so.2 $LFS/lib64
+            ln -sfv ../lib/ld-linux-x86-64.so.2 $LFS/lib64/ld-lsb-x86-64.so.3
+    ;;
+esac
 
 ```
 
 ## RESSOURCE
 
 - [LFS book](https://www.linuxfromscratch.org/lfs/view/stable/index.html)
-
+- [ChrisTitusTech LFS video](https://www.youtube.com/watch?v=oV541sgHKGo)
