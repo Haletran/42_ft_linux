@@ -3,8 +3,7 @@ VM_IP = "192.168.56.110"
 VM_NAME = "LFS-builder"
 
 MEM = 4096
-CORE = 4
-DISK_SIZE = "20GB"
+CORE = 6
 LFS_DISK_SIZE = "70GB"
  
 Vagrant.configure("2") do |config|
@@ -12,7 +11,6 @@ Vagrant.configure("2") do |config|
   
     config.vm.define VM_NAME do |controller|
     controller.vm.hostname = VM_NAME
-    controller.disksize.size = DISK_SIZE
     controller.vm.provider "virtualbox" do |v|
         v.memory = MEM
         v.cpus = CORE
