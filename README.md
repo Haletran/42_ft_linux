@@ -106,56 +106,112 @@ vagrant halt
 vagrant destroy -f
 ```
 
-### PARTITIONS 
-
-> /boot – Highly recommended. Use this partition to store kernels and other booting information. To minimize potential boot problems with larger disks, make this the first physical partition on your first disk drive. A partition size of 200 megabytes is adequate. 
-
-> A root LFS partition (not to be confused with the /root directory) of twenty gigabytes is a good compromise for most systems. It provides enough space to build LFS and most of BLFS, but is small enough so that multiple partitions can be easily created for experimentation. 
-
->  Most distributions automatically create a swap partition. Generally the recommended size of the swap partition is about twice the amount of physical RAM, however this is rarely needed. If disk space is limited, hold the swap partition to two gigabytes and monitor the amount of disk swapping.If you want to use the hibernation feature (suspend-to-disk) of Linux, it writes out the contents of RAM to the swap partition before turning off the machine. In this case the size of the swap partition should be at least as large as the system's installed RAM.Swapping is never good. For mechanical hard drives you can generally tell if a system is swapping by just listening to disk activity and observing how the system reacts to commands. With an SSD you will not be able to hear swapping, but you can tell how much swap space is being used by running the top or free programs. Use of an SSD for a swap partition should be avoided if possible. The first reaction to swapping should be to check for an unreasonable command such as trying to edit a five gigabyte file. If swapping becomes a normal occurrence, the best solution is to purchase more RAM for your system. 
+## STEPS
 
 
 ```bash
 # create the partitions
-sudo parted /dev/sda
+sudo parted /dev/sdb
 ## /boot 200M
-## / 20G
-## swap 2G
+## / 50G
+## swap 10G
 mklabel gpt
 mkpart primary ext4 1MiB 201MiB
-mkpart primary ext4 201MiB 30GiB
-mkpart primary linux-swap 30GiB 32GiB
+mkpart primary ext4 201MiB 50GiB
+mkpart primary linux-swap 50GiB 60GiB
 
 # format the partitions
-mkfs -v -t ext4 /dev/<xxx>
-sudo mkfs.ext4 /dev/sda1
+sudo mkfs.ext4 /dev/sdb1
+sudo mkfs.ext4 /dev/sdb2
 # create a swap partition
-mkswap /dev/<yyy>
-```
+sudo mkswap /dev/sdb3
 
-```bash
 # setup the $LFS variable
 sudo mkdir -v /mnt/lfs
 export LFS=/mnt/lfs
 # mount the partitions
-mount -v -t ext4 /dev/<xxx> $LFS
-mount -v -t ext4 /dev/<yyy> $LFS/boot
-swapon -v /dev/<zzz>
+sudo mount -v -t ext4 /dev/sdb2 $LFS
+sudo mkdir -v /mnt/lfs/boot
+sudo mount -v -t ext4 /dev/sdb1 $LFS/boot
+sudo swapon -v /dev/sdb3
 
-systemctl daemon-reload
-```
+sudo systemctl daemon-reload
 
-> You should ensure that this variable is always defined throughout the LFS build process. It should be set to the name of the directory where you will be building your LFS system - we will use /mnt/lfs as an example, but you may choose any directory name you want.
+## PART 3
 
-```bash 
-#Create the mount point and mount the LFS file system with these commands: 
-mkdir -pv $LFS
-mount -v -t ext4 /dev/<xxx> $LFS
-#If you are using multiple partitions for LFS (e.g., one for / and another for /home), mount them like this:
-mkdir -pv $LFS
-mount -v -t ext4 /dev/<xxx> $LFS
-mkdir -v $LFS/home
-mount -v -t ext4 /dev/<yyy> $LFS/home
+#  create sources 
+sudo mkdir -v $LFS/sources
+sudo chmod -v a+wt $LFS/sources
+
+# download the list of packages
+wget --input-file="https://www.linuxfromscratch.org/lfs/view/stable/wget-list-sysv" --continue --directory-prefix=$LFS/sources
+# download the packages
+wget --input-file=wget-list-sysv --continue --directory-prefix=$LFS/sources
+# make the packages owned by root
+chown root:root $LFS/sources/*
+# might need to add patches to some packages https://www.linuxfromscratch.org/lfs/view/stable/chapter03/patches.html
+
+
+## PART 4
+
+# create the tools directory
+sudo bash /vagrant/scripts/setup_directory.sh
+sudo mkdir -pv $LFS/tools
+# add the lfs user
+sudo groupadd lfs
+sudo useradd -s /bin/bash -g lfs -m -k /dev/null lfs
+sudo passwd lfs
+
+sudo bash /vagrant/scripts/grant_permissions.sh
+
+# login as lfs
+su - lfs
+
+# setup the environment
+
+#create the bash_profile file
+cat > ~/.bash_profile << "EOF"
+exec env -i HOME=$HOME TERM=$TERM PS1='\u:\w\$ ' /bin/bash
+EOF
+# create the bashrc file
+cat > ~/.bashrc << "EOF"
+set +h
+umask 022
+LFS=/mnt/lfs
+LC_ALL=POSIX
+LFS_TGT=$(uname -m)-lfs-linux-gnu
+PATH=/usr/bin
+if [ ! -L /bin ]; then PATH=/bin:$PATH; fi
+PATH=$LFS/tools/bin:$PATH
+CONFIG_SITE=$LFS/usr/share/config.site
+export LFS LC_ALL LFS_TGT PATH CONFIG_SITE
+export MAKEFLAGS=-j$(nproc)
+EOF
+
+# reload the bash_profile
+source ~/.bash_profile
+
+## PART 5 - Compiling Cross-Toolchain
+
+tar -xvf $LFS/sources/binutils-2.43.1.tar.xz
+cd binutils-2.43.1 && mkdir -v build && cd build
+
+# prepare Binutils for compilation: 
+../configure --prefix=$LFS/tools \
+             --with-sysroot=$LFS \
+             --target=$LFS_TGT   \
+             --disable-nls       \
+             --enable-gprofng=no \
+             --disable-werror    \
+             --enable-new-dtags  \
+             --enable-default-hash-style=gnu
+
+# Compile and install the package
+make
+make install
+
+
+
 ```
 
 ## RESSOURCE

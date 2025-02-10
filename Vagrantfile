@@ -6,25 +6,25 @@ MEM = 4096
 CORE = 4
 DISK_SIZE = "20GB"
 LFS_DISK_SIZE = "70GB"
-
+ 
 Vagrant.configure("2") do |config|
     config.vm.box = "debian/bookworm64"
   
     config.vm.define VM_NAME do |controller|
     controller.vm.hostname = VM_NAME
+    controller.disksize.size = DISK_SIZE
     controller.vm.provider "virtualbox" do |v|
         v.memory = MEM
         v.cpus = CORE
         v.name = VM_NAME
     end
     controller.vm.disk :disk, size: LFS_DISK_SIZE, name: "extra_storage1"
-    controller.disksize.size = DISK_SIZE
     controller.vm.network "private_network", type: "static", ip: VM_IP
     controller.vm.synced_folder ".", "/vagrant", type: "virtualbox"
     controller.vm.provision "shell", inline: <<-SHELL
             apt-get update
             apt-get install -y bison gcc make patch perl python3 texinfo parted gawk g++
-            bash /vagrant/check_requirements.sh
+            bash /vagrant/scripts/check_requirements.sh
     SHELL
 end
 end
