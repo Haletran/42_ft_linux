@@ -2,7 +2,7 @@
 VM_IP = "192.168.56.110"
 VM_NAME = "LFS-builder"
 
-MEM = 4096
+MEM = 8096
 CORE = 6
 LFS_DISK_SIZE = "70GB"
  
@@ -23,6 +23,7 @@ Vagrant.configure("2") do |config|
             apt-get update
             apt-get install -y bison gcc make patch perl python3 texinfo parted gawk g++
             bash /vagrant/scripts/check_requirements.sh
+            bash /vagrant/scripts/create_lfs.sh
     SHELL
 end
 end
