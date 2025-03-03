@@ -24,6 +24,7 @@ Vagrant.configure("2") do |config|
             apt-get install -y bison gcc make patch perl python3 texinfo parted gawk g++
             bash /vagrant/scripts/check_requirements.sh
             bash /vagrant/scripts/create_lfs.sh
+            su - lfs
     SHELL
 end
 end

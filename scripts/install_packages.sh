@@ -1,35 +1,74 @@
 #!/bin/bash
 
+set -e # setup try and catch
+
+LFS=/mnt/lfs
+export MAKEFLAGS='-j$(nproc)'
+
 cd $LFS/sources
-tar -xvf $LFS/sources/binutils-2.43.1.tar.xz
-cd binutils-2.43.1 && mkdir -v build && cd build
 
-# prepare Binutils for compilation: 
-../configure --prefix=$LFS/tools \
-             --with-sysroot=$LFS \
-             --target=$LFS_TGT   \
-             --disable-nls       \
-             --enable-gprofng=no \
-             --disable-werror    \
-             --enable-new-dtags  \
-             --enable-default-hash-style=gnu
+go_back() {
+    folder=$1
+    cd $LFS/sources/
+    if [ -d "$folder" ]; then
+        rm -rf $folder
+    fi
+}
 
-# Compile and install the package
+
+create_build_dir() {
+    if [ -d build ]; then
+        rm -rf build
+    fi
+    mkdir -v build
+    cd       build
+}
+
+## BINUTILS
+tar -xvf $LFS/sources/binutils-*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'binutils-*' | head -n 1)
+create_build_dir
+../configure --prefix=/tools            \
+             --with-sysroot=$LFS        \
+             --with-lib-path=/tools/lib \
+             --target=$LFS_TGT          \
+             --disable-nls              \
+             --disable-werror
+
 make
+case $(uname -m) in
+  x86_64) mkdir -v /tools/lib && ln -sv lib /tools/lib64 ;;
+esac
 make install
+go_back "binutils-*"
 
-cd ../.. && rm -rf binutils-2.43.1
-tar -xvf $LFS/sources/gcc-14.2.0.tar.xz && cd gcc-14.2.0
 
-# prepare GCC for compilation
-tar -xf ../mpfr-4.2.1.tar.xz
-mv -v mpfr-4.2.1 mpfr
-tar -xf ../gmp-6.3.0.tar.xz
-mv -v gmp-6.3.0 gmp
-tar -xf ../mpc-1.3.1.tar.gz
-mv -v mpc-1.3.1 mpc
+## GCC
 
-# set the default directory for 64-bit libraries
+tar -xf $LFS/sources/gcc-*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'gcc-*' | head -n 1)
+tar -xf ../mpfr-*.tar.xz
+mv -v mpfr-* mpfr
+tar -xf ../gmp-*.tar.xz
+mv -v gmp-* gmp
+tar -xf ../mpc-*.tar.gz
+mv -v mpc-* mpc
+
+
+for file in gcc/config/{linux,i386/linux{,64}}.h
+do
+  cp -uv $file{,.orig}
+  sed -e 's@/lib\(64\)\?\(32\)\?/ld@/tools&@g' \
+      -e 's@/usr@/tools@g' $file.orig > $file
+  echo '
+#undef STANDARD_STARTFILE_PREFIX_1
+#undef STANDARD_STARTFILE_PREFIX_2
+#define STANDARD_STARTFILE_PREFIX_1 "/tools/lib/"
+#define STANDARD_STARTFILE_PREFIX_2 ""' >> $file
+  touch $file.orig
+done
+
+
 case $(uname -m) in
   x86_64)
     sed -e '/m64=/s/lib64/lib/' \
@@ -37,322 +76,472 @@ case $(uname -m) in
  ;;
 esac
 
-
-# create a build directory
-mkdir -v build && cd build
-
-../configure                  \
-    --target=$LFS_TGT         \
-    --prefix=$LFS/tools       \
-    --with-glibc-version=2.40 \
-    --with-sysroot=$LFS       \
-    --with-newlib             \
-    --without-headers         \
-    --enable-default-pie      \
-    --enable-default-ssp      \
-    --disable-nls             \
-    --disable-shared          \
-    --disable-multilib        \
-    --disable-threads         \
-    --disable-libatomic       \
-    --disable-libgomp         \
-    --disable-libquadmath     \
-    --disable-libssp          \
-    --disable-libvtv          \
-    --disable-libstdcxx       \
+create_build_dir
+../configure                                       \
+    --target=$LFS_TGT                              \
+    --prefix=/tools                                \
+    --with-glibc-version=2.11                      \
+    --with-sysroot=$LFS                            \
+    --with-newlib                                  \
+    --without-headers                              \
+    --with-local-prefix=/tools                     \
+    --with-native-system-header-dir=/tools/include \
+    --disable-nls                                  \
+    --disable-shared                               \
+    --disable-multilib                             \
+    --disable-decimal-float                        \
+    --disable-threads                              \
+    --disable-libatomic                            \
+    --disable-libgomp                              \
+    --disable-libmpx                               \
+    --disable-libquadmath                          \
+    --disable-libssp                               \
+    --disable-libvtv                               \
+    --disable-libstdcxx                            \
     --enable-languages=c,c++
 
 make
 make install
 
+## API headers (linux)
 
-cd ..
-cat gcc/limitx.h gcc/glimits.h gcc/limity.h > \
-  `dirname $($LFS_TGT-gcc -print-libgcc-file-name)`/include/limits.h
-cd .. && rm -rf gcc-14.2.0
-
-tar -xvf linux-6.10.5.tar.xz && cd linux-6.10.5
+tar -xf $LFS/sources/linux-*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'linux-*' | head -n 1)
 make mrproper
-make headers
-find usr/include -type f ! -name '*.h' -delete
+make INSTALL_HDR_PATH=dest headers_install
+cp -rv dest/include/* /tools/include
+go_back "linux-*"
 
-# sudo mkdir -v usr
-# sudo chown -R lfs:lfs /mnt/lfs/usr
-cp -rv usr/include $LFS/usr
-cd .. && rm -rf linux-6.10.5
-tar -xvf glibc-2.40.tar.xz && cd glibc-2.40
-patch -Np1 -i ../glibc-2.40-fhs-1.patch
-echo "rootsbindir=/usr/sbin" > configparms
-mkdir -v build && cd build
+## Glibc
+
+tar -xf $LFS/sources/glibc-*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'glibc-*' | head -n 1)
+create_build_dir
 
 ../configure                             \
-      --prefix=/usr                      \
+      --prefix=/tools                    \
       --host=$LFS_TGT                    \
       --build=$(../scripts/config.guess) \
-      --enable-kernel=4.19               \
-      --with-headers=$LFS/usr/include    \
-      --disable-nscd                     \
-      libc_cv_slibdir=/usr/lib
+      --enable-kernel=3.2             \
+      --with-headers=/tools/include      \
+      libc_cv_forced_unwind=yes          \
+      libc_cv_c_cleanup=yes
 
-make #-j1 if problems
-make DESTDIR=$LFS install
-sed '/RTLDLIST=/s@/usr@@g' -i $LFS/usr/bin/ldd
+make
+make install
 
-# check if everything is setup correctly 
-echo 'int main(){}' | $LFS_TGT-gcc -xc -
-readelf -l a.out | grep ld-linux
+echo 'int main(){}' > dummy.c
+$LFS_TGT-gcc dummy.c
+if readelf -l a.out | grep ': /tools'; then
+    echo "Glibc compilation OK"
+    rm -v dummy.c a.out
+else
+    echo "Glibc compilation failed"
+    exit 1
+fi
 
-rm -v a.out
-cd ../.. && rm -rf glibc-2.40
 
-cd gcc-14.2.0
-mkdir -v build && cd build
 
+## Libstdc++
+
+create_build_dir
 ../libstdc++-v3/configure           \
     --host=$LFS_TGT                 \
-    --build=$(../config.guess)      \
-    --prefix=/usr                   \
+    --prefix=/tools                 \
     --disable-multilib              \
     --disable-nls                   \
+    --disable-libstdcxx-threads     \
     --disable-libstdcxx-pch         \
-    --with-gxx-include-dir=/tools/$LFS_TGT/include/c++/14.2.0
+    --with-gxx-include-dir=/tools/$LFS_TGT/include/c++/7.3.0
 
 make
-make DESTDIR=$LFS install
-rm -v $LFS/usr/lib/lib{stdc++{,exp,fs},supc++}.la
+make install
 
-cd ../.. && rm -rf gcc-14.2.0
-tar -xvf m4-1.4.19.tar.xz && cd m4-1.4.19
-./configure --prefix=/usr   \
-            --host=$LFS_TGT \
-            --build=$(build-aux/config.guess)
-make
-make DESTDIR=$LFS install
-cd .. && rm -rf m4-1.4.19
-
-tar -xvf ncurses-6.5.tar.gz && cd ncurses-6.5
-sed -i s/mawk// configure
-mkdir build
-
-pushd build
-  ../configure
-  make -C include
-  make -C progs tic
-popd
-
-./configure --prefix=/usr                \
-            --host=$LFS_TGT              \
-            --build=$(./config.guess)    \
-            --mandir=/usr/share/man      \
-            --with-manpage-format=normal \
-            --with-shared                \
-            --without-normal             \
-            --with-cxx-shared            \
-            --without-debug              \
-            --without-ada                \
-            --disable-stripping
+go_back "gcc-*"
 
 
-cd build && make
-make DESTDIR=$LFS TIC_PATH=$(pwd)/build/progs/tic install
-ln -sv libncursesw.so $LFS/usr/lib/libncurses.so
-sed -e 's/^#if.*XOPEN.*$/#if 1/' \
-    -i $LFS/usr/include/curses.h
-
-cd ../.. && rm -rf ncurses-6.5
+## Binutils (again)
 
 
-# bash will not work if ncurses is not installed correctly
-tar -xvf bash-5.2.32.tar.gz && cd bash-5.2.32
-./configure --prefix=/usr                      \
-            --build=$(sh support/config.guess) \
-            --host=$LFS_TGT                    \
-            --without-bash-malloc              \
-            bash_cv_strtold_broken=no
-
-make
-make DESTDIR=$LFS install
-ln -sv bash $LFS/bin/sh
-
-cd ..
-tar -xvf coreutils-9.5.tar.xz && cd coreutils-9.5
-./configure --prefix=/usr                     \
-            --host=$LFS_TGT                   \
-            --build=$(build-aux/config.guess) \
-            --enable-install-program=hostname \
-            --enable-no-install-program=kill,uptime
-
-make
-make DESTDIR=$LFS install
-
-mv -v $LFS/usr/bin/chroot              $LFS/usr/sbin
-mkdir -pv $LFS/usr/share/man/man8
-mv -v $LFS/usr/share/man/man1/chroot.1 $LFS/usr/share/man/man8/chroot.8
-sed -i 's/"1"/"8"/'                    $LFS/usr/share/man/man8/chroot.8
-
-cd .. && rm -rf coreutils-9.5
-tar -xvf diffutils-3.10.tar.xz && cd diffutils-3.10
-./configure --prefix=/usr   \
-            --host=$LFS_TGT \
-            --build=$(./build-aux/config.guess)
-
-make
-make DESTDIR=$LFS install
-cd .. && rm -rf diffutils-3.10
-
-
-tar -xvf file-5.45.tar.gz && cd file-5.45
-mkdir build && cd build
-
-pushd build
-  ../configure --disable-bzlib      \
-               --disable-libseccomp \
-               --disable-xzlib      \
-               --disable-zlib
-  make
-popd
-
-cd .. && ./configure --prefix=/usr --host=$LFS_TGT --build=$(./config.guess)
-
-make FILE_COMPILE=$(pwd)/build/src/file
-make DESTDIR=$LFS install\
-rm -v $LFS/usr/lib/libmagic.la
-
-cd .. && rm -rf file-5.45
-tar -xvf findutils-4.10.0.tar.xz && cd findutils-4.10.0
-make
-make DESTDIR=$LFS install
-
-
-cd .. && rm -rf findutils-4.10.0
-tar -xvf gawk-5.3.0.tar.xz && cd gawk-5.3.0
-sed -i 's/extras//' Makefile.in
-./configure --prefix=/usr   \
-            --host=$LFS_TGT \
-            --build=$(build-aux/config.guess)
-
-make
-make DESTDIR=$LFS install
-
-
-cd .. && rm -rf gawk-5.3.0
-tar -xvf grep-3.11.tar.xz && cd grep-3.11
-./configure --prefix=/usr   \
-            --host=$LFS_TGT \
-            --build=$(./build-aux/config.guess)
-make
-make DESTDIR=$LFS install
-
-
-cd .. && rm -rf grep-3.11
-tar -xvf gzip-1.13.tar.xz && cd gzip-1.13
-./configure --prefix=/usr --host=$LFS_TGT
-make
-make DESTDIR=$LFS install
-
-cd .. && rm -rf gzip-1.13
-tar -xvf make-4.4.1.tar.gz && cd make-4.4.1
-./configure --prefix=/usr   \
-            --without-guile \
-            --host=$LFS_TGT \
-            --build=$(build-aux/config.guess)
-make
-make DESTDIR=$LFS install
-
-
-cd .. && rm -rf make-4.4.1
-tar -xvf patch-2.7.6.tar.gz && cd patch-2.7.6
-./configure --prefix=/usr   \
-            --host=$LFS_TGT \
-            --build=$(build-aux/config.guess)
-make
-make DESTDIR=$LFS install
-
-cd .. && rm -rf patch-2.7.6
-tar -xvf sed-4.9.tar.xz && cd sed-4.9
-./configure --prefix=/usr   \
-            --host=$LFS_TGT \
-            --build=$(./build-aux/config.guess)
-make
-make DESTDIR=$LFS install
-
-cd .. && rm -rf sed-4.9
-tar -xvf tar-1.35.tar.xz && cd tar-1.35
-./configure --prefix=/usr                     \
-            --host=$LFS_TGT                   \
-            --build=$(build-aux/config.guess)
-
-make
-make DESTDIR=$LFS install
-
-cd .. && rm -rf tar-1.35
-tar -xvf xz-5.6.2.tar.xf && cd xz-5.6.2
-./configure --prefix=/usr                     \
-            --host=$LFS_TGT                   \
-            --build=$(build-aux/config.guess) \
-            --disable-static                  \
-            --docdir=/usr/share/doc/xz-5.6.2
-make
-make DESTDIR=$LFS install
-rm -v $LFS/usr/lib/liblzma.la
-
-cd .. && rm -rf xz-5.6.2
-tar -xvf binutils-2.43.1.tar.xz && cd binutils-2.43.1
-sed '6009s/$add_dir//' -i ltmain.sh
-mkdir -v build
-cd       build
-
+tar -xf $LFS/sources/binutils-*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'binutils-*' | head -n 1)
+create_build_dir
+CC=$LFS_TGT-gcc
+AR=$LFS_TGT-ar
+RANLIB=$LFS_TGT-ranlib
 
 ../configure                   \
-    --prefix=/usr              \
-    --build=$(../config.guess) \
-    --host=$LFS_TGT            \
+    --prefix=/tools            \
     --disable-nls              \
-    --enable-shared            \
-    --enable-gprofng=no        \
     --disable-werror           \
-    --enable-64-bit-bfd        \
-    --enable-new-dtags         \
-    --enable-default-hash-style=gnu
+    --with-lib-path=/tools/lib \
+    --with-sysroot
 
 make
-make DESTDIR=$LFS install
-rm -v $LFS/usr/lib/lib{bfd,ctf,ctf-nobfd,opcodes,sframe}.{a,la}
+make install
+make -C ld clean
+make -C ld LIB_PATH=/usr/lib:/lib
+cp -v ld/ld-new /tools/bin
+go_back "binutils-*"
 
-cd .. && rm -rf binutils-2.43.1
-tar -xvf gcc-14.2.0.tar.xz && cd gcc-14.2.0
-tar -xf ../mpfr-4.2.1.tar.xz
-mv -v mpfr-4.2.1 mpfr
-tar -xf ../gmp-6.3.0.tar.xz
-mv -v gmp-6.3.0 gmp
-tar -xf ../mpc-1.3.1.tar.gz
-mv -v mpc-1.3.1 mpc
+## GCC (again)
 
-sed '/thread_header =/s/@.*@/gthr-posix.h/' \
-    -i libgcc/Makefile.in libstdc++-v3/include/Makefile.in
+cat gcc/limitx.h gcc/glimits.h gcc/limity.h >  `dirname \
+  $($LFS_TGT-gcc -print-libgcc-file-name)`/include-fixed/limits.h
 
-mkdir -v build
-cd       build
+for file in gcc/config/{linux,i386/linux{,64}}.h
+do
+  cp -uv $file{,.orig}
+  sed -e 's@/lib\(64\)\?\(32\)\?/ld@/tools&@g' \
+      -e 's@/usr@/tools@g' $file.orig > $file
+  echo '
+#undef STANDARD_STARTFILE_PREFIX_1
+#undef STANDARD_STARTFILE_PREFIX_2
+#define STANDARD_STARTFILE_PREFIX_1 "/tools/lib/"
+#define STANDARD_STARTFILE_PREFIX_2 ""' >> $file
+  touch $file.orig
+done
 
+case $(uname -m) in
+  x86_64)
+    sed -e '/m64=/s/lib64/lib/' \
+        -i.orig gcc/config/i386/t-linux64
+  ;;
+esac
+
+tar -xf $LFS/sources/gcc-*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'gcc-*' | head -n 1)
+
+tar -xf ../mpfr-4.0.1.tar.xz
+mv -v mpfr-4.0.1 mpfr
+tar -xf ../gmp-6.1.2.tar.xz
+mv -v gmp-6.1.2 gmp
+tar -xf ../mpc-1.1.0.tar.gz
+mv -v mpc-1.1.0 mpc
+
+
+create_build_dir
+CC=$LFS_TGT-gcc
+CXX=$LFS_TGT-g++
+AR=$LFS_TGT-ar
+RANLIB=$LFS_TGT-ranlib
 ../configure                                       \
-    --build=$(../config.guess)                     \
-    --host=$LFS_TGT                                \
-    --target=$LFS_TGT                              \
-    LDFLAGS_FOR_TARGET=-L$PWD/$LFS_TGT/libgcc      \
-    --prefix=/usr                                  \
-    --with-build-sysroot=$LFS                      \
-    --enable-default-pie                           \
-    --enable-default-ssp                           \
-    --disable-nls                                  \
+    --prefix=/tools                                \
+    --with-local-prefix=/tools                     \
+    --with-native-system-header-dir=/tools/include \
+    --enable-languages=c,c++                       \
+    --disable-libstdcxx-pch                        \
     --disable-multilib                             \
-    --disable-libatomic                            \
-    --disable-libgomp                              \
-    --disable-libquadmath                          \
-    --disable-libsanitizer                         \
-    --disable-libssp                               \
-    --disable-libvtv                               \
-    --enable-languages=c,c++
+    --disable-bootstrap                            \
+    --disable-libgomp
+
 
 make
-make DESTDIR=$LFS install
-ln -sv gcc $LFS/usr/bin/cc
+make install
+ln -sv gcc /tools/bin/cc
+
+echo 'int main(){}' > dummy.c
+$LFS_TGT-gcc dummy.c
+if readelf -l a.out | grep ': /tools'; then
+    echo "Glibc compilation OK"
+    rm -v dummy.c a.out
+else
+    echo "Glibc compilation failed"
+    exit 1
+fi
+
+go_back "gcc-*"
+
+## Tcl-core
+
+tar -xf $LFS/sources/tcl-core*.tar.gz
+cd $(find . -maxdepth 1 -type d -name 'tcl-core-*' | head -n 1)
+./configure --prefix=/tools
+make
+
+TZ=UTC make test
+
+make install
+chmod -v u+w /tools/lib/libtcl8.6.so
+make install-private-headers
+ln -sv tclsh8.6 /tools/bin/tclsh
+
+
+go_back "tcl-*"
+
+## Expect
+
+tar -xf $LFS/sources/expect*.tar.gz
+cd $(find . -maxdepth 1 -type d -name 'expect-*' | head -n 1)
+cp -v configure{,.orig}
+sed 's:/usr/local/bin:/bin:' configure.orig > configure
+
+./configure --prefix=/tools       \
+            --with-tcl=/tools/lib \
+            --with-tclinclude=/tools/include
+
+make
+make test
+make SCRIPTS="" install
+go_back "expect-*"
+
+## Dejagnu
+
+tar -xf $LFS/sources/dejagnu*.tar.gz
+cd $(find . -maxdepth 1 -type d -name 'dejagnu-*' | head -n 1)
+./configure --prefix=/tools
+make install
+make check
+go_back "dejagnu-*"
+
+## M4
+
+tar -xf $LFS/sources/m4*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'm4-*' | head -n 1)
+./configure --prefix=/tools
+make
+make check
+make install
+go_back "m4-*"
+
+## Ncurses
+
+tar -xf $LFS/sources/ncurses*.tar.gz
+cd $(find . -maxdepth 1 -type d -name 'ncurses-*' | head -n 1)
+if sed -i s/mawk// configure; then
+    echo "Mawk removed"
+else
+    echo "Mawk not removed"
+fi
+
+./configure --prefix=/tools \
+            --with-shared   \
+            --without-debug \
+            --without-ada   \
+            --enable-widec  \
+            --enable-overwrite
+
+make
+make install
+go_back "ncurses-*"
+
+## Bash
+
+tar -xf $LFS/sources/bash*.tar.gz
+cd $(find . -maxdepth 1 -type d -name 'bash-*' | head -n 1)
+./configure --prefix=/tools --without-bash-malloc
+make
+make tests
+make install
+ln -sv bash /tools/bin/sh
+
+go_back "bash-*"
+
+## Bison
+
+tar -xf $LFS/sources/bison*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'bison-*' | head -n 1)
+./configure --prefix=/tools
+make
+make check
+make install
+go_back "bison-*"
+
+## Bzip2
+
+tar -xf $LFS/sources/bzip2*.tar.gz
+cd $(find . -maxdepth 1 -type d -name 'bzip2-*' | head -n 1)
+make
+make PREFIX=/tools install
+
+go_back "bzip2-*"
+
+
+## Coreutils
+
+tar -xf $LFS/sources/coreutils*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'coreutils-*' | head -n 1)
+./configure --prefix=/tools --enable-install-program=hostname
+make
+make install
+
+go_back "coreutils-*"
+
+
+## Diffutils
+
+tar -xf $LFS/sources/diffutils*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'diffutils-*' | head -n 1)
+./configure --prefix=/tools
+make
+make install
+
+go_back "diffutils-*"
+
+
+## File 
+
+tar -xf $LFS/sources/file*.tar.gz
+cd $(find . -maxdepth 1 -type d -name 'file-*' | head -n 1)
+./configure --prefix=/tools
+make
+make install
+
+go_back "file-*"
+
+## Findutils
+
+tar -xf $LFS/sources/findutils*.tar.gz
+cd $(find . -maxdepth 1 -type d -name 'findutils-*' | head -n 1)
+./configure --prefix=/tools
+make
+make install
+
+go_back "findutils-*"
+
+## Gawk
+
+tar -xf $LFS/sources/gawk*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'gawk-*' | head -n 1)
+./configure --prefix=/tools
+make
+make install
+
+go_back "gawk-*"
+
+## Gettext
+
+tar -xf $LFS/sources/gettext*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'gettext-*' | head -n 1)
+cd gettext-tools
+EMACS="no" ./configure --prefix=/tools --disable-shared
+
+make -C gnulib-lib
+make -C intl pluralx.c
+make -C src msgfmt
+make -C src msgmerge
+make -C src xgettext
+
+cp -v src/{msgfmt,msgmerge,xgettext} /tools/bin
+
+go_back "gettext-*"
+
+## Grep
+
+tar -xf $LFS/sources/grep*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'grep-*' | head -n 1)
+./configure --prefix=/tools
+make
+make install
+
+go_back "grep-*"
+
+## Gzip
+
+tar -xf $LFS/sources/gzip*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'gzip-*' | head -n 1)
+./configure --prefix=/tools
+make
+make install
+
+go_back "gzip-*"
+
+## Make
+
+tar -xf $LFS/sources/make*.tar.bz2
+cd $(find . -maxdepth 1 -type d -name 'make-*' | head -n 1)
+sed -i '211,217 d; 219,229 d; 232 d' glob/glob.c
+./configure --prefix=/tools --without-guile
+make
+make install
+
+go_back "make-*"
+
+## Patch
+
+tar -xf $LFS/sources/patch*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'patch-*' | head -n 1)
+./configure --prefix=/tools
+make
+make install
+
+go_back "patch-*"
+
+## Perl
+
+tar -xf $LFS/sources/perl*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'perl-*' | head -n 1)
+sh Configure -des -Dprefix=/tools -Dlibs=-lm
+make
+cp -v perl cpan/podlators/scripts/pod2man /tools/bin
+mkdir -pv /tools/lib/perl5/5.26.1
+cp -Rv lib/* /tools/lib/perl5/5.26.1
+
+go_back "perl-*"
+
+## Sed
+
+tar -xf $LFS/sources/sed*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'sed-*' | head -n 1)
+./configure --prefix=/tools
+make
+make install
+
+go_back "sed-*"
+
+## Tar
+
+tar -xf $LFS/sources/tar*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'tar-*' | head -n 1)
+./configure --prefix=/tools
+make
+make install
+
+go_back "tar-*"
+
+## Texinfo 
+
+tar -xf $LFS/sources/texinfo*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'texinfo-*' | head -n 1)
+./configure --prefix=/tools
+make
+make install
+
+go_back "texinfo-*"
+
+## Util-linux
+
+tar -xf $LFS/sources/util-linux*.tar.xz
+cd $(find . -maxdepth 1 -type d -name 'util-linux-*' | head -n 1)
+./configure --prefix=/tools               \
+            --without-python               \
+            --disable-makeinstall-chown    \
+            --without-systemdsystemunitdir \
+            --without-ncurses              \
+            PKG_CONFIG=""
+
+make
+make install
+go_back "util-linux-*"
+
+## Xz
+
+tar -xf $LFS/sources/xz*.tar.xz 
+cd $(find . -maxdepth 1 -type d -name 'xz-*' | head -n 1)
+./configure --prefix=/tools
+make
+make install
+
+go_back "xz-*"
+
+## Delete useless files
+
+strip --strip-debug /tools/lib/*
+/usr/bin/strip --strip-unneeded /tools/{,s}bin/*
+
+rm -rf /tools/{,share}/{info,man,doc}
+find /tools/{lib,libexec} -name \*.la -delete
+
+chown -R root:root $LFS/tools
+
+
