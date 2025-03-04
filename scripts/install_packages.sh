@@ -142,8 +142,9 @@ fi
 
 
 
-## Libstdc++
+## 
 
+cd $(find . -maxdepth 1 -type d -name 'gcc-*' | head -n 1)
 create_build_dir
 ../libstdc++-v3/configure           \
     --host=$LFS_TGT                 \
