@@ -110,6 +110,15 @@ su - lfs
 # install and the build packages toolkit
 ./install_packages.sh
 
+# setup base system
+./setup_base.sh
+
+# launch the shell
+exec /tools/bin/bash --login +h
+
+# install apps
+./install_apps.sh
+
 # Here i am : https://www.fr.linuxfromscratch.org/view/lfs-8.2-fr/chapter06/kernfs.html
 
 ```
