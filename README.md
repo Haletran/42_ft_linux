@@ -96,10 +96,10 @@
 
 ```bash
 # check if the requirements are met
-./check_requirements.sh
+sudo bash check_requirements.sh
 
 # setup lfs (wget the book, create the lfs user, create the lfs partition)
-./create_lfs.sh
+sudo bash create_lfs.sh
 
 # login as lfs user
 su - lfs
