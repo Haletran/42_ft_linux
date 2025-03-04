@@ -144,6 +144,7 @@ fi
 
 ## Libstdc++
 
+cd $LFS/sources
 cd $(find . -maxdepth 1 -type d -name 'gcc-*' | head -n 1)
 create_build_dir
 ../libstdc++-v3/configure           \
