@@ -4,12 +4,6 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
-
-if ! lsblk | grep -q "/dev/sdb"; then
-    echo -e "${RED}No disk found (expected /dev/sdb)${NC}"
-    exit 1
-fi
-
 DISK="/dev/sdb"
 
 echo -e "${YELLOW}Creating disk partitions...${NC}"
@@ -49,7 +43,8 @@ pushd $LFS/sources
 md5sum -c md5sums
 popd
 
-bash /vagrant/scripts/setup_directory.sh
+cd -
+bash setup_directory.sh
 cd $LFS
 
 echo -e "${YELLOW}Setting up tools directory and user...${NC}"
@@ -58,7 +53,12 @@ ln -sv $LFS/tools /
 groupadd lfs
 useradd -s /bin/bash -g lfs -m -k /dev/null lfs
 echo "lfs:lfs" | chpasswd
-sudo bash /vagrant/scripts/grant_access.sh
+
+mkdir -v $LFS/scripts
+cd $LFS/scripts
+git clone https://github.com/Haletran/42_ft_linux.git
+cd -
+sudo bash grant_access.sh
 chown -R lfs:lfs /mnt/lfs/
 chown -v lfs $LFS/tools
 chown -v lfs $LFS/sources
