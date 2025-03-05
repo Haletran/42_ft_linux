@@ -98,6 +98,10 @@
 # check if the requirements are met
 sudo bash check_requirements.sh
 
+#if there are some missing requirements (on Debian-based system)
+sudo apt-get update
+sudo apt install make g++ texinfo bison gawk
+
 # setup lfs (wget the book, create the lfs user, create the lfs partition)
 sudo bash create_lfs.sh
 
