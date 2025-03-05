@@ -7,6 +7,8 @@ export MAKEFLAGS='-j$(nproc)'
 
 cd $LFS/sources
 
+touch /tmp/tool
+
 go_back() {
     folder=$1
     cd $LFS/sources/
