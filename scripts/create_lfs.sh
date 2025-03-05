@@ -13,6 +13,7 @@ fi
 
 if [ -f /tmp/tool ]; then
     bash reset_lfs.sh
+    rm -f /tmp/tool
 fi
 
 echo -e "${YELLOW}Creating disk partitions...${NC}"
