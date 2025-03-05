@@ -56,9 +56,7 @@ pushd $LFS/sources
 md5sum -c md5sums
 popd
 
-cd -
 bash setup_directory.sh
-cd $LFS
 
 echo -e "${YELLOW}Setting up tools directory and user...${NC}"
 mkdir -v $LFS/tools
@@ -67,11 +65,14 @@ groupadd lfs
 useradd -s /bin/bash -g lfs -m -k /dev/null lfs
 echo "lfs:lfs" | chpasswd
 
+
+echo -e "${YELLOW}Setting up scripts directory...${NC}"
 mkdir -v $LFS/scripts
 cd $LFS/scripts
 git clone https://github.com/Haletran/42_ft_linux.git
 cd -
-sudo bash grant_access.sh
+
+bash grant_access.sh
 chown -R lfs:lfs /mnt/lfs/
 chown -v lfs $LFS/tools
 chown -v lfs $LFS/sources
